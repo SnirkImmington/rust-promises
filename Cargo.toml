@@ -1,0 +1,4 @@
+[package]
+name = "rust-promises"
+version = "0.1.0"
+authors = ["Snirk Immington <snirk.immington@gmail.com>"]
