@@ -21,6 +21,7 @@ enum PromiseJoinType {
 
 impl<T, E> Promise<T, E> {
 
+    /// Chains a function to be called after this promise resolves.
     pub fn then<T2, E2>(self, callback: fn(f: T) -> Result<T2, E2>,
                               errback:  fn(e: E) -> Result<T2, E2>)
                         -> Promise<T2, E2> {
@@ -31,10 +32,10 @@ impl<T, E> Promise<T, E> {
             if let Some(message) = recv.recv() { // Blocking receive until message
                 match message {
                     Ok(val) => {
-                        tx.send(callback(val));
+                        let _ = tx.send(callback(val)).unwrap_or(());
                     }
                     Err(err) => {
-                        tx.send(errback(err));
+                        let _ = tx.send(errback(err)).unwrap_or(());
                     }
                 }
             }
@@ -44,14 +45,34 @@ impl<T, E> Promise<T, E> {
         return Promise { receiver: rx };
     }
 
-    pub fn new(func: fn(fulfill: T, err: E)) -> Promise<T, E> {
-    }
-}
+    /// Chains a function to be called after this promise resolves.
+    pub fn then_result<T2, E2>(self,
+                               callback: fn(input: Result<T, E>) -> Result<T2, E2>),
+                               -> Promise<T2, E2> {
+        let recv = self.receiver;
+        let recv2 = self.receiver;
+        let (tx, rx) = channel();
 
-// Make sure to give notification to the vat.
-impl<T, E> Drop for Promise<T, E> {
-    fn drop(self: &mut Self) {
-        self.signaler.send(PromiseMessage::OriginDropped);
+        let thread = thread::spawn(move || {
+            if let Some(result) = recv.recv() { // Blocking receive until message
+                let _ = tx.send(callback(result)).unwrap_or(());
+            }
+            else { // Receive failed, origin was dropped
+            }
+        });
+        return Promise { receiver: rx };
+    }
+
+
+    pub fn new(func: fn() -> Result<T, E>) -> Promise<T, E> {
+        let (tx, rx) = channel();
+
+        let thread = thread::spawn(move || {
+            let result = func();
+            let _ = tx.send(func).unwrap_or(());
+        });
+
+        return Promise { receiver: rx };
     }
 }
 
@@ -73,10 +94,6 @@ pub fn reject<T, E>(val: E) -> Promise<T, E> {
 fn spawn_vat<T, E>(func: fn(reciever: Receiver<PromiseMessage>) -> Result<T, E>) -> (Receiver<Result<T, E>>, JoinHandle<()>) {
     let (tx, rx) = channel();
 
-}
-
-fn vat_simple(rx: Receiver<PromiseMessage>) {
-    
 }
 
 fn vat_join() {
