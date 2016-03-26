@@ -55,13 +55,14 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            internal::then(tx, recv, callback, errback);
+            Promise::promise_then(tx, recv, callback, errback);
         });
         recv.recv();
         return Promise { receiver: rx };
     }
 
-    /// Chains a function to be called after this promise resolves, using a `Result` type.
+    /// Chains a function to be called after this promise resolves,
+    /// using a `Result` type.
     pub fn then_result<T2, E2>(self,
                                callback: fn(Result<T, E>) -> Result<T2, E2>)
                                -> Promise<T2, E2>
@@ -71,11 +72,7 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            if let Ok(result) = recv.recv() {
-                let _ = tx.send(callback(result)).unwrap_or(());
-            }
-            else { // Receive failed, origin was dropped
-            }
+            Promise::promise_then_result(tx, callback);
         });
         return Promise { receiver: rx };
     }
@@ -94,35 +91,35 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
     }
 
     /// Applies a promise to the first of some promises to become fulfilled.
-    pub fn race<T, E>(promises: Vec<Promise<T, E>>) -> Promise<T, E> {
-            let mut receivers = promises.into_iter().map(|p| p.receiver).collect();
-            let (tx, rx) = channel();
+    pub fn race(promises: Vec<Promise<T, E>>) -> Promise<T, E> {
+        let mut receivers = promises.into_iter().map(|p| p.receiver).collect();
+        let (tx, rx) = channel();
 
-            thread::spawn(move || {
-                Promise::race_function(receivers, tx);
-            });
-
-            return Promise { receiver: rx };
-        }
+        thread::spawn(move || {
+            Promise::race_function(receivers, tx);
+        });
+        return Promise { receiver: rx };
+    }
 
     /// Calls a function with the result of all of the promises, or the error
     /// of the first promise to error.
-    pub fn all<T, E>(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E> {
-            let receivers: Vec<Receiver<Result<T, E>>> = promises.into_iter().map(|p| p.receiver).collect();
-            let (tx, rx) = channel();
+    pub fn all(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E> {
+        let receivers: Vec<Receiver<Result<T, E>>> =
+            promises.into_iter().map(|p| p.receiver).collect();
+        let (tx, rx) = channel();
 
-            thread::spawn(move || {
-                Promise::all_function(receivers, tx);
-            });
+        thread::spawn(move || {
+            Promise::all_function(receivers, tx);
+        });
 
-            return Promise { receiver: rx };
+        return Promise { receiver: rx };
     }
 
     /// Creates a promise that resolves to a value
-    pub fn resolve<T, E>(val: T) -> Promise<T, E> {
+    pub fn resolve(val: T) -> Promise<T, E> {
     }
 
-    pub fn reject<T, E>(val: E) -> Promise<T, E> {
+    pub fn reject(val: E) -> Promise<T, E> {
     }
 
     // Implementation Functions
