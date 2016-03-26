@@ -1,4 +1,5 @@
 //! Promises in Rust.
+//! See the `Promise` struct for more details.
 
 #![warn(missing_docs)]
 
@@ -46,7 +47,7 @@ pub struct Promise<T: Send, E: Send> {
     receiver: Receiver<Result<T, E>>
 }
 
-impl<T, E> Promise<T, E> where T: Send + 'static, E: Send + 'static {
+impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Chains a function to be called after this promise resolves.
     pub fn then<T2, E2>(self, callback: fn(f: T) -> Result<T2, E2>,
@@ -59,6 +60,7 @@ impl<T, E> Promise<T, E> where T: Send + 'static, E: Send + 'static {
         let thread = thread::spawn(move || {
             internal::then(tx, recv, callback, errback);
         });
+        recv.recv();
         return Promise { receiver: rx };
     }
 
@@ -94,66 +96,66 @@ impl<T, E> Promise<T, E> where T: Send + 'static, E: Send + 'static {
 
         return Promise { receiver: rx };
     }
-}
-
-pub fn race<T, E>(promises: Vec<Promise<T, E>>) -> Promise<T, E>
-where T: Send + 'static, E: Send + 'static {
-    let mut receivers = promises.into_iter().map(|p| p.receiver).collect();
-    let (tx, rx) = channel();
-
-    thread::spawn(move || {
-        race_function(receivers, tx);
-    });
-
-    return Promise { receiver: rx };
-}
-
-pub fn all<T, E>(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E>
-where T: Send + 'static, E: Send + 'static {
-    let receivers: Vec<Receiver<Result<T, E>>> = promises.into_iter().map(|p| p.receiver).collect();
-    let (tx, rx) = channel();
-
-    thread::spawn(move || {
-        all_function(receivers, tx);
-    });
-
-    return Promise { receiver: rx };
-}
 
 
-pub fn resolve<T, E>(val: E) -> Promise<T, E> {
-}
+    pub fn race<T, E>(promises: Vec<Promise<T, E>>) -> Promise<T, E>
+        where T: Send + 'static, E: Send + 'static {
+            let mut receivers = promises.into_iter().map(|p| p.receiver).collect();
+            let (tx, rx) = channel();
 
-pub fn reject<T, E>(val: E) -> Promise<T, E> {
-}
+            thread::spawn(move || {
+                race_function(receivers, tx);
+            });
 
-fn race_function<T, E>(receivers: Vec<Receiver<Result<T, E>>>, tx: Sender<Result<T, E>>)
-where T: Send + 'static, E: Send + 'static {
-    'outer: loop {
-        for i in 0..receivers.len() {
-            match receivers[i].try_recv() {
-                Ok(val) => {
-                    let _ = tx.send(val).unwrap_or(());
-                    return;
-                }
-                Err(err) => {
-                    if err == TryRecvError::Disconnected {
-                        receivers.remove(i);
+            return Promise { receiver: rx };
+        }
+
+    pub fn all<T, E>(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E>
+        where T: Send + 'static, E: Send + 'static {
+            let receivers: Vec<Receiver<Result<T, E>>> = promises.into_iter().map(|p| p.receiver).collect();
+            let (tx, rx) = channel();
+
+            thread::spawn(move || {
+                all_function(receivers, tx);
+            });
+
+            return Promise { receiver: rx };
+        }
+
+
+    pub fn resolve<T, E>(val: E) -> Promise<T, E> {
+    }
+
+    pub fn reject<T, E>(val: E) -> Promise<T, E> {
+    }
+
+    fn race_function<T, E>(receivers: Vec<Receiver<Result<T, E>>>, tx: Sender<Result<T, E>>)
+        where T: Send + 'static, E: Send + 'static {
+            'outer: loop {
+                for i in 0..receivers.len() {
+                    match receivers[i].try_recv() {
+                        Ok(val) => {
+                            let _ = tx.send(val).unwrap_or(());
+                            return;
+                        }
+                        Err(err) => {
+                            if err == TryRecvError::Disconnected {
+                                receivers.remove(i);
+                            }
+                        }
                     }
                 }
             }
         }
-    }
-}
 
-fn all_function<T, E>(receivers: Vec<Receiver<Result<T, E>>>, tx: Sender<Result<Vec<T>, E>>)
-where T: Send + 'static, E: Send + 'static {
-    let mut values: Vec<T> = Vec::with_capacity(receivers.len());
-    let mut mut_receivers = receivers; //.into_iter().map(|r| r.clone()).collect();
-    'outer: loop {
-        for rec in receivers {
-            match rec.try_recv() {
-                Ok(val) => {
+    fn all_function<T, E>(receivers: Vec<Receiver<Result<T, E>>>, tx: Sender<Result<Vec<T>, E>>)
+        where T: Send + 'static, E: Send + 'static {
+            let mut values: Vec<T> = Vec::with_capacity(receivers.len());
+            let mut mut_receivers = receivers; //.into_iter().map(|r| r.clone()).collect();
+            'outer: loop {
+                for rec in receivers {
+                    match rec.try_recv() {
+                        Ok(val) => {
                     match val {
                         Ok(t) => values.push(t),
                         Err(e) => {
@@ -168,4 +170,5 @@ where T: Send + 'static, E: Send + 'static {
             }
         }
     }
+}
 }
