@@ -9,11 +9,41 @@ use std::thread::JoinHandle;
 use std::marker::{Send};
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 
-use self::internal::*;
+mod internal;
+use internal::*;
 
-/// A promise is a way of doing work in the background
-pub struct Promise<T, E> where T: Send, E: Send {
-    receiver: Receiver<Result<T, E>> // Get the result of the promise for chaining (pass into then)
+/// A promise is a way of doing work in the background. The promises in
+/// this library have the same featureset as those in Ecmascript 5.
+///
+/// # Promises
+/// Promises (sometimes known as "futures") are objects that represent
+/// asynchronous tasks being run in the background, or results which
+/// will exist in the future.
+/// A promise will be in state of running, fulfilled, or done. In order to
+/// use the results of a fulfilled promise, one attaches another promise
+/// to it (i.e. via `then`). Like their Javascript counterparts, promises can
+/// return an error (of type `E`).
+///
+/// # Panics
+/// If the function being executed by a promise panics, it does so silently.
+/// The panic will not resurface in the thread which created the promise,
+/// and promises waiting on its result will never be called. In addition,
+/// the `all` and `race` proimse methods will _ignore_ "dead" promises. They
+/// will remove promises from their lists, and if there aren't any left
+/// they will silently exit without doing anything.
+///
+/// Unfortunately, panics must be ignored for two reasons:
+/// * Panic messages don't have a concrete type yet in Rust. If they did,
+/// promiess would be able to inspect their predecessors' errors.
+/// * Although a `Receiver` can correctly handle its paired `Sender` being
+/// dropped, such as during a panic, for reasons stated above the "message"
+/// of the panic is not relayed.
+///
+/// Finally, Ecmascript promises themselves do have the ability to return
+/// and error type, represented as a `Result<T, E>` here. Thus, one should
+/// use `try!` and other error handling rather than calls to `unwrap()`.
+pub struct Promise<T: Send, E: Send> {
+    receiver: Receiver<Result<T, E>>
 }
 
 impl<T, E> Promise<T, E> where T: Send + 'static, E: Send + 'static {
@@ -27,18 +57,7 @@ impl<T, E> Promise<T, E> where T: Send + 'static, E: Send + 'static {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            if let Ok(message) = recv.recv() { // Blocking receive until message
-                match message {
-                    Ok(val) => {
-                        let _ = tx.send(callback(val)).unwrap_or(());
-                    }
-                    Err(err) => {
-                        let _ = tx.send(errback(err)).unwrap_or(());
-                    }
-                }
-            }
-            else { // Receive failed, origin was dropped
-            }
+            internal::then(tx, recv, callback, errback);
         });
         return Promise { receiver: rx };
     }
