@@ -1,4 +1,4 @@
 [package]
-name = "rust-promises"
+name = "promises"
 version = "0.1.0"
 authors = ["Snirk Immington <snirk.immington@gmail.com>"]
