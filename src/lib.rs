@@ -79,37 +79,42 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Creates a new promsie
     pub fn new<F>(func: F) -> Promise<T, E>
-        where F: Send + 'static + FnOnce() -> Result<T, E> {
+    where F: Send + 'static + FnOnce() -> Result<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            let result = func();
-            let _ = tx.send(result).unwrap_or(());
+            Promise::promise_new(tx, func);
         });
 
         return Promise { receiver: rx };
     }
 
     /// Applies a promise to the first of some promises to become fulfilled.
-    pub fn race(promises: Vec<Promise<T, E>>) -> Promise<T, E> {
-        let mut receivers = promises.into_iter().map(|p| p.receiver).collect();
-        let (tx, rx) = channel();
+    pub fn race<T2, E2>(promises: Vec<Promise<T, E>>,
+                        func: fn(res: Result<T, E>) -> Result<T2, E2>)
+                        -> Promise<T2, E2>
+    where T2: Send + 'static, E2: Send + 'static {
+        let mut recs = promises.into_iter().map(|p| p.receiver).collect();
+        let (tx, rx) = channel::<Result<T2, E2>>();
 
         thread::spawn(move || {
-            Promise::race_function(receivers, tx);
+            Promise::promise_race(tx, recs, func);
         });
         return Promise { receiver: rx };
     }
 
     /// Calls a function with the result of all of the promises, or the error
     /// of the first promise to error.
-    pub fn all(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E> {
+    pub fn all<T2, E2>(promises: Vec<Promise<T, E>>,
+                       func: fn(res: Result<Vec<T>, E>) -> Result<T2, E2>)
+                       -> Promise<Vec<T>, E>
+    where T2: Send + 'static, E2: Send + 'static {
         let receivers: Vec<Receiver<Result<T, E>>> =
             promises.into_iter().map(|p| p.receiver).collect();
         let (tx, rx) = channel();
 
         thread::spawn(move || {
-            Promise::all_function(receivers, tx);
+            Promise::promise_all(receivers, tx);
         });
 
         return Promise { receiver: rx };
@@ -117,15 +122,26 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Creates a promise that resolves to a value
     pub fn resolve(val: T) -> Promise<T, E> {
+        Promise::from_result(Ok(val))
     }
 
+    /// Creates a promise that resolves to an error.
     pub fn reject(val: E) -> Promise<T, E> {
+        Promise::from_result(Err(val))
+    }
+
+    /// Creates a new promise that will resolve to the result value.
+    pub fn from_result(result: Result<T, E>) -> Promise<T, E> {
+        let (tx, rx) = channel();
+        tx.send(result).unwrap();
+
+        Promise { receiver: rx }
     }
 
     // Implementation Functions
 
     fn promise_new(tx: Sender<Result<T, E>>,
-                   func: Box<FnOnce() -> Reuslt<T, E>>) {
+                   func: Box<FnOnce() -> Result<T, E>>) {
         let result = func();
         tx.send(result).unwrap_or(());
     }
@@ -143,8 +159,8 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         }
     }
 
-    fn promise_then_result<T2, E2>(tx: Sender<Result<T, E>>,
-                                   rx: Receiver<Result<T2, E2>>,
+    fn promise_then_result<T2, E2>(tx: Sender<Result<T2, E2>>,
+                                   rx: Receiver<Result<T, E>>,
                                  callback: fn(Result<T, E>) -> Result<T2, E2>)
     where T2: Send + 'static, E2: Send + 'static {
 
@@ -155,18 +171,21 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     // Static methods
 
-    fn promise_race(receivers: Vec<Receiver<Result<T, E>>>,
-                           tx: Sender<Result<T, E>>) {
+    fn promise_race<T2, E2>(tx: Sender<Result<T2, E2>>,
+                            recs: Vec<Receiver<Result<T, E>>>,
+                            func: fn(Result<T, E>) -> Result<T2, E2>)
+    where T2: Send + 'static, E2: Send + 'static {
         'outer: loop {
-            for i in 0..receivers.len() {
-                match receivers[i].try_recv() {
+            for i in 0..recs.len() {
+                match recs[i].try_recv() {
                     Ok(val) => {
-                        let _ = tx.send(val).unwrap_or(());
+                        let new_val = func(val);
+                        let _ = tx.send(new_val).unwrap_or(());
                         return;
                     }
                     Err(err) => {
                         if err == TryRecvError::Disconnected {
-                            receivers.remove(i);
+                            recs.remove(i);
                         }
                     }
                 }
