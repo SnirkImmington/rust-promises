@@ -10,9 +10,6 @@ use std::thread::JoinHandle;
 use std::marker::{Send};
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 
-mod internal;
-use internal::*;
-
 /// A promise is a way of doing work in the background. The promises in
 /// this library have the same featureset as those in Ecmascript 5.
 ///
@@ -64,9 +61,9 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         return Promise { receiver: rx };
     }
 
-    /// Chains a function to be called after this promise resolves.
+    /// Chains a function to be called after this promise resolves, using a `Result` type.
     pub fn then_result<T2, E2>(self,
-                               callback: fn(input: Result<T, E>) -> Result<T2, E2>)
+                               callback: fn(Result<T, E>) -> Result<T2, E2>)
                                -> Promise<T2, E2>
     where T2: Send + 'static, E2: Send + 'static {
         let recv = self.receiver;
@@ -74,7 +71,7 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            if let Ok(result) = recv.recv() { // Blocking receive until message
+            if let Ok(result) = recv.recv() {
                 let _ = tx.send(callback(result)).unwrap_or(());
             }
             else { // Receive failed, origin was dropped
@@ -85,8 +82,7 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Creates a new promsie
     pub fn new<F>(func: F) -> Promise<T, E>
-        where T: Send + 'static, E: Send + 'static,
-              F: Send + 'static + FnOnce() -> Result<T, E> {
+        where F: Send + 'static + FnOnce() -> Result<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
@@ -97,78 +93,111 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         return Promise { receiver: rx };
     }
 
-
-    pub fn race<T, E>(promises: Vec<Promise<T, E>>) -> Promise<T, E>
-        where T: Send + 'static, E: Send + 'static {
+    /// Applies a promise to the first of some promises to become fulfilled.
+    pub fn race<T, E>(promises: Vec<Promise<T, E>>) -> Promise<T, E> {
             let mut receivers = promises.into_iter().map(|p| p.receiver).collect();
             let (tx, rx) = channel();
 
             thread::spawn(move || {
-                race_function(receivers, tx);
+                Promise::race_function(receivers, tx);
             });
 
             return Promise { receiver: rx };
         }
 
-    pub fn all<T, E>(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E>
-        where T: Send + 'static, E: Send + 'static {
+    /// Calls a function with the result of all of the promises, or the error
+    /// of the first promise to error.
+    pub fn all<T, E>(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E> {
             let receivers: Vec<Receiver<Result<T, E>>> = promises.into_iter().map(|p| p.receiver).collect();
             let (tx, rx) = channel();
 
             thread::spawn(move || {
-                all_function(receivers, tx);
+                Promise::all_function(receivers, tx);
             });
 
             return Promise { receiver: rx };
-        }
+    }
 
-
-    pub fn resolve<T, E>(val: E) -> Promise<T, E> {
+    /// Creates a promise that resolves to a value
+    pub fn resolve<T, E>(val: T) -> Promise<T, E> {
     }
 
     pub fn reject<T, E>(val: E) -> Promise<T, E> {
     }
 
-    fn race_function<T, E>(receivers: Vec<Receiver<Result<T, E>>>, tx: Sender<Result<T, E>>)
-        where T: Send + 'static, E: Send + 'static {
-            'outer: loop {
-                for i in 0..receivers.len() {
-                    match receivers[i].try_recv() {
-                        Ok(val) => {
-                            let _ = tx.send(val).unwrap_or(());
-                            return;
-                        }
-                        Err(err) => {
-                            if err == TryRecvError::Disconnected {
-                                receivers.remove(i);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    // Implementation Functions
 
-    fn all_function<T, E>(receivers: Vec<Receiver<Result<T, E>>>, tx: Sender<Result<Vec<T>, E>>)
-        where T: Send + 'static, E: Send + 'static {
-            let mut values: Vec<T> = Vec::with_capacity(receivers.len());
-            let mut mut_receivers = receivers; //.into_iter().map(|r| r.clone()).collect();
-            'outer: loop {
-                for rec in receivers {
-                    match rec.try_recv() {
-                        Ok(val) => {
-                    match val {
-                        Ok(t) => values.push(t),
-                        Err(e) => {
-                            let _ = tx.send(Err(e)).unwrap_or(());
-                            return;
+    fn promise_new(tx: Sender<Result<T, E>>,
+                   func: Box<FnOnce() -> Reuslt<T, E>>) {
+        let result = func();
+        tx.send(result).unwrap_or(());
+    }
+
+    fn promise_then<T2, E2>(tx: Sender<Result<T2, E2>>,
+                            rx: Receiver<Result<T, E>>,
+                            callback: fn(T) -> Result<T2, E2>,
+                            errback: fn(E) -> Result<T2, E2>)
+    where T2: Send + 'static, E2: Send + 'static {
+        if let Ok(message) = rx.recv() {
+            match message {
+                Ok(val) => tx.send(callback(val)).unwrap_or(()),
+                Err(err) => tx.send(errback(err)).unwrap_or(())
+            };
+        }
+    }
+
+    fn promise_then_result<T2, E2>(tx: Sender<Result<T, E>>,
+                                   rx: Receiver<Result<T2, E2>>,
+                                 callback: fn(Result<T, E>) -> Result<T2, E2>)
+    where T2: Send + 'static, E2: Send + 'static {
+
+        if let Ok(result) = rx.recv() {
+            tx.send(callback(result)).unwrap_or(());
+        }
+    }
+
+    // Static methods
+
+    fn promise_race(receivers: Vec<Receiver<Result<T, E>>>,
+                           tx: Sender<Result<T, E>>) {
+        'outer: loop {
+            for i in 0..receivers.len() {
+                match receivers[i].try_recv() {
+                    Ok(val) => {
+                        let _ = tx.send(val).unwrap_or(());
+                        return;
+                    }
+                    Err(err) => {
+                        if err == TryRecvError::Disconnected {
+                            receivers.remove(i);
                         }
                     }
-                }
-                Err(err) => {
-                    // Remove dead promises?
                 }
             }
         }
     }
-}
+
+    fn promise_all(receivers: Vec<Receiver<Result<T, E>>>,
+                          tx: Sender<Result<Vec<T>, E>>) {
+        let mut values: Vec<T> = Vec::with_capacity(receivers.len());
+        let mut mut_receivers = receivers;
+        'outer: loop {
+            for rec in receivers {
+                match rec.try_recv() {
+                    Ok(val) => {
+                        match val {
+                            Ok(t) => values.push(t),
+                            Err(e) => {
+                                let _ = tx.send(Err(e)).unwrap_or(());
+                                return;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        // Remove dead promises?
+                    }
+                }
+            }
+        }
+    }
 }
