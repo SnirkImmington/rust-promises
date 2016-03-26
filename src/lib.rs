@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 use std::marker::{Send};
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 
-type Promiseable = Send + 'static;
+use self::internal::*;
 
 /// A promise is a way of doing work in the background
 pub struct Promise<T, E> where T: Send, E: Send {
@@ -149,29 +149,4 @@ where T: Send + 'static, E: Send + 'static {
             }
         }
     }
-}
-
-#[test]
-fn test_channels() {
-    println!("Begin test...");
-    let mut guard: Option<JoinHandle<_>> = None;
-    let mut rec: Option<Receiver<_>> = None;
-
-    {
-        println!("\tBegin inner scope...");
-        let (tx, rx) = channel();
-        guard = Some(thread::spawn(move || {
-            println!("\t\tThread created!");
-            tx.send("Hello!").unwrap();
-            println!("\t\tThread finished!");
-        }));
-        rec = Some(rx);
-        println!("\t(tx, rx) out of scope");
-    }
-
-    println!("Sleeping...");
-    thread::sleep(Duration::from_secs(2));
-    println!("Receiving result...");
-    let result = rec.unwrap().recv();
-    assert_eq!(result, Ok("Hello!"));
 }
