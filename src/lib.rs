@@ -47,7 +47,7 @@ pub struct Promise<T: Send, E: Send> {
 impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Chains a function to be called after this promise resolves.
-    pub fn then<T2, E2>(self, callback: fn(f: T) -> Result<T2, E2>,
+    pub fn then<T2, E2>(self, callback: fn(t: T) -> Result<T2, E2>,
                               errback:  fn(e: E) -> Result<T2, E2>)
                         -> Promise<T2, E2>
     where T2: Send + 'static, E2: Send + 'static {
@@ -55,66 +55,60 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            Promise::promise_then(tx, recv, callback, errback);
+            Promise::impl_then(tx, recv, callback, errback);
         });
-        recv.recv();
         return Promise { receiver: rx };
     }
 
     /// Chains a function to be called after this promise resolves,
     /// using a `Result` type.
     pub fn then_result<T2, E2>(self,
-                               callback: fn(Result<T, E>) -> Result<T2, E2>)
+                               callback: fn(r: Result<T, E>) -> Result<T2, E2>)
                                -> Promise<T2, E2>
     where T2: Send + 'static, E2: Send + 'static {
         let recv = self.receiver;
-        let recv2 = self.receiver;
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            Promise::promise_then_result(tx, callback);
+            Promise::impl_then_result(tx, callback);
         });
         return Promise { receiver: rx };
     }
 
-    /// Creates a new promsie
+    /// Creates a new promsie, which will eventually resolve to one of the
+    /// values of the `Result<T, E>` type.
     pub fn new<F>(func: F) -> Promise<T, E>
     where F: Send + 'static + FnOnce() -> Result<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            Promise::promise_new(tx, func);
+            Promise::impl_new(tx, func);
         });
 
         return Promise { receiver: rx };
     }
 
     /// Applies a promise to the first of some promises to become fulfilled.
-    pub fn race<T2, E2>(promises: Vec<Promise<T, E>>,
-                        func: fn(res: Result<T, E>) -> Result<T2, E2>)
-                        -> Promise<T2, E2>
-    where T2: Send + 'static, E2: Send + 'static {
-        let mut recs = promises.into_iter().map(|p| p.receiver).collect();
-        let (tx, rx) = channel::<Result<T2, E2>>();
+    pub fn race(promises: Vec<Promise<T, E>>) -> Promise<T, E> {
+        let recs = promises.into_iter().map(|p| p.receiver).collect();
+        let (tx, rx) = channel();
 
         thread::spawn(move || {
-            Promise::promise_race(tx, recs, func);
+            Promise::impl_race(tx, recs);
         });
-        return Promise { receiver: rx };
+
+        Promise { receiver: rx }
     }
 
     /// Calls a function with the result of all of the promises, or the error
     /// of the first promise to error.
-    pub fn all<T2, E2>(promises: Vec<Promise<T, E>>,
-                       func: fn(res: Result<Vec<T>, E>) -> Result<T2, E2>)
-                       -> Promise<Vec<T>, E>
-    where T2: Send + 'static, E2: Send + 'static {
+    pub fn all(promises: Vec<Promise<T, E>>) -> Promise<Vec<T>, E> {
         let receivers: Vec<Receiver<Result<T, E>>> =
             promises.into_iter().map(|p| p.receiver).collect();
         let (tx, rx) = channel();
 
         thread::spawn(move || {
-            Promise::promise_all(receivers, tx);
+            Promise::impl_all(tx, receivers);
         });
 
         return Promise { receiver: rx };
@@ -140,13 +134,13 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     // Implementation Functions
 
-    fn promise_new(tx: Sender<Result<T, E>>,
-                   func: Box<FnOnce() -> Result<T, E>>) {
+    fn impl_new(tx: Sender<Result<T, E>>,
+                func: Box<FnOnce() -> Result<T, E>>) {
         let result = func();
         tx.send(result).unwrap_or(());
     }
 
-    fn promise_then<T2, E2>(tx: Sender<Result<T2, E2>>,
+    fn impl_then<T2, E2>(tx: Sender<Result<T2, E2>>,
                             rx: Receiver<Result<T, E>>,
                             callback: fn(T) -> Result<T2, E2>,
                             errback: fn(E) -> Result<T2, E2>)
@@ -159,9 +153,9 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         }
     }
 
-    fn promise_then_result<T2, E2>(tx: Sender<Result<T2, E2>>,
-                                   rx: Receiver<Result<T, E>>,
-                                 callback: fn(Result<T, E>) -> Result<T2, E2>)
+    fn impl_then_result<T2, E2>(tx: Sender<Result<T2, E2>>,
+                                rx: Receiver<Result<T, E>>,
+                                callback: fn(Result<T, E>) -> Result<T2, E2>)
     where T2: Send + 'static, E2: Send + 'static {
 
         if let Ok(result) = rx.recv() {
@@ -171,16 +165,15 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     // Static methods
 
-    fn promise_race<T2, E2>(tx: Sender<Result<T2, E2>>,
-                            recs: Vec<Receiver<Result<T, E>>>,
-                            func: fn(Result<T, E>) -> Result<T2, E2>)
-    where T2: Send + 'static, E2: Send + 'static {
+    fn impl_race<T2, E2>(tx: Sender<Result<T, E>>,
+                         recs: Vec<Receiver<Result<T, E>>>) {
         'outer: loop {
+            // Don't get stuck in an infinite loop
+            if recs.len() == 0 { return; }
             for i in 0..recs.len() {
                 match recs[i].try_recv() {
                     Ok(val) => {
-                        let new_val = func(val);
-                        let _ = tx.send(new_val).unwrap_or(());
+                        tx.send(val).unwrap_or(());
                         return;
                     }
                     Err(err) => {
@@ -193,26 +186,36 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         }
     }
 
-    fn promise_all(receivers: Vec<Receiver<Result<T, E>>>,
-                          tx: Sender<Result<Vec<T>, E>>) {
-        let mut values: Vec<T> = Vec::with_capacity(receivers.len());
-        let mut mut_receivers = receivers;
+    fn impl_all<T2, E2>(tx: Sender<Result<Vec<T>, E>>,
+                        recs: Vec<Receiver<Result<T, E>>>) {
+        let mut values: Vec<T> = Vec::with_capacity(recs.len());
+        let mut mut_receivers = recs;
         'outer: loop {
-            for rec in receivers {
-                match rec.try_recv() {
+            for i in 0..mut_receivers.len() {
+                match mut_receivers[i].try_recv() {
                     Ok(val) => {
                         match val {
                             Ok(t) => values.push(t),
-                            Err(e) => {
-                                let _ = tx.send(Err(e)).unwrap_or(());
+                            Err(_) => {
+                                tx.send(val).unwrap_or(());
                                 return;
                             }
                         }
+                        mut_receivers.remove(i);
                     }
                     Err(err) => {
-                        // Remove dead promises?
+                        if err == TryRecvError::Disconnected {
+                            mut_receivers.remove(i);
+                        }
                     }
                 }
+            }
+            // Check if we are finished waiting for promises
+            // This can also happen if all promises panic
+            if mut_receivers.len() == 0 {
+                let result = Ok(values);
+                tx.send(result).unwrap_or(());
+                return; // Break from outer loop
             }
         }
     }
