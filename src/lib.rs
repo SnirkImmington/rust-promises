@@ -5,8 +5,7 @@
 
 use std::thread;
 use std::sync::mpsc::channel;
-use std::time::Duration;
-use std::thread::JoinHandle;
+//use std::thread::JoinHandle;
 use std::marker::{Send};
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 
@@ -54,10 +53,11 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         let recv = self.receiver;
         let (tx, rx) = channel();
 
-        let thread = thread::spawn(move || {
+        thread::spawn(move || {
             Promise::impl_then(tx, recv, callback, errback);
         });
-        return Promise { receiver: rx };
+
+        Promise { receiver: rx }
     }
 
     /// Chains a function to be called after this promise resolves,
@@ -69,10 +69,11 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         let recv = self.receiver;
         let (tx, rx) = channel();
 
-        let thread = thread::spawn(move || {
+        thread::spawn(move || {
             Promise::impl_then_result(tx, recv, callback);
         });
-        return Promise { receiver: rx };
+
+        Promise { receiver: rx }
     }
 
     /// Creates a new promsie, which will eventually resolve to one of the
@@ -80,11 +81,11 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
     pub fn new<F>(func: fn() -> Result<T, E>) -> Promise<T, E> {
         let (tx, rx) = channel();
 
-        let thread = thread::spawn(move || {
+        thread::spawn(move || {
             Promise::impl_new(tx, func);
         });
 
-        return Promise { receiver: rx };
+        Promise { receiver: rx }
     }
 
     /// Applies a promise to the first of some promises to become fulfilled.
