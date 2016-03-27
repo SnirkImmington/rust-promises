@@ -70,15 +70,14 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
-            Promise::impl_then_result(tx, callback);
+            Promise::impl_then_result(tx, recv, callback);
         });
         return Promise { receiver: rx };
     }
 
     /// Creates a new promsie, which will eventually resolve to one of the
     /// values of the `Result<T, E>` type.
-    pub fn new<F>(func: F) -> Promise<T, E>
-    where F: Send + 'static + FnOnce() -> Result<T, E> {
+    pub fn new<F>(func: fn() -> Result<T, E>) -> Promise<T, E> {
         let (tx, rx) = channel();
 
         let thread = thread::spawn(move || {
@@ -91,7 +90,7 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
     /// Applies a promise to the first of some promises to become fulfilled.
     pub fn race(promises: Vec<Promise<T, E>>) -> Promise<T, E> {
         let recs = promises.into_iter().map(|p| p.receiver).collect();
-        let (tx, rx) = channel();
+        let (tx, rx) = channel::<Result<T, E>>();
 
         thread::spawn(move || {
             Promise::impl_race(tx, recs);
@@ -135,7 +134,7 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
     // Implementation Functions
 
     fn impl_new(tx: Sender<Result<T, E>>,
-                func: Box<FnOnce() -> Result<T, E>>) {
+                func: fn() -> Result<T, E>) {
         let result = func();
         tx.send(result).unwrap_or(());
     }
@@ -165,8 +164,8 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     // Static methods
 
-    fn impl_race<T2, E2>(tx: Sender<Result<T, E>>,
-                         recs: Vec<Receiver<Result<T, E>>>) {
+    fn impl_race(tx: Sender<Result<T, E>>,
+                 mut recs: Vec<Receiver<Result<T, E>>>) {
         'outer: loop {
             // Don't get stuck in an infinite loop
             if recs.len() == 0 { return; }
@@ -186,8 +185,8 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         }
     }
 
-    fn impl_all<T2, E2>(tx: Sender<Result<Vec<T>, E>>,
-                        recs: Vec<Receiver<Result<T, E>>>) {
+    fn impl_all(tx: Sender<Result<Vec<T>, E>>,
+                recs: Vec<Receiver<Result<T, E>>>) {
         let mut values: Vec<T> = Vec::with_capacity(recs.len());
         let mut mut_receivers = recs;
         'outer: loop {
@@ -196,8 +195,8 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
                     Ok(val) => {
                         match val {
                             Ok(t) => values.push(t),
-                            Err(_) => {
-                                tx.send(val).unwrap_or(());
+                            Err(e) => {
+                                tx.send(Err(e)).unwrap_or(());
                                 return;
                             }
                         }
