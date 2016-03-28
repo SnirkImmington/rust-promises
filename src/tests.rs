@@ -28,11 +28,9 @@ fn handle_result(r: Result<File, io::Error>) -> Result<(), ()> {
 
 #[test]
 pub fn test_new() {
-    let file_name = "/tmp/rust-promise-tests/new";
-
-    println!("Created promise");
-    let p: Promise<(), ()> = Promise::new::<File>(create_file)
-        .then_result(handle_result);
+    let p: Promise<(), ()> = Promise::new(|| {
+        File::create("/tmp/promise-new")
+    }).then_result(handle_result);
 
     thread::sleep(Duration::from_secs(1));
 

@@ -83,7 +83,8 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Creates a new promsie, which will eventually resolve to one of the
     /// values of the `Result<T, E>` type.
-    pub fn new<F>(func: fn() -> Result<T, E>) -> Promise<T, E> {
+    pub fn new<F>(func: F) -> Promise<T, E>
+    where F: FnOnce() -> Result<T, E>, F: Send + 'static {
         let (tx, rx) = channel();
 
         thread::spawn(move || {
@@ -139,8 +140,8 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     // Implementation Functions
 
-    fn impl_new(tx: Sender<Result<T, E>>,
-                func: fn() -> Result<T, E>) {
+    fn impl_new<F>(tx: Sender<Result<T, E>>, func: F)
+    where F: FnOnce() -> Result<T, E>, F: Send + 'static {
         let result = func();
         tx.send(result).unwrap_or(());
     }
