@@ -19,12 +19,11 @@ use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 /// Promises (sometimes known as "futures") are objects that represent
 /// asynchronous tasks being run in the background, or results which
 /// will exist in the future.
-/// A promise will be in state of running, fulfilled, failed, or done. In order
-/// to use the results of a fulfilled promise, one attaches another promise
-/// to it (i.e. via `then`). Like their Javascript counterparts, promises can
-/// return an error (of type `E`). Unlike Javascript, success or failure is indicated
-/// by a `Result` type. This is much more Rustic and allows existing functions which
-/// return `Result<T, E>` to be used.
+/// A promise will be in state of running, fulfilled, rejected, or done.
+/// In order to use the results of a fulfilled promise, one attaches another
+/// promise to it (i.e. via `then`). Like their Javascript counterparts,
+/// promises can return an error (of type `E`). Unlike Javascript, success or /// failure is indicated by a `Result` type. This is much more Rustic and
+/// allows existing functions which return a `Result<T, E>` to be used.
 ///
 /// # Panics
 /// If the function being executed by a promise panics, it does so silently.
