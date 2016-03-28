@@ -22,7 +22,8 @@ use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 /// A promise will be in state of running, fulfilled, rejected, or done.
 /// In order to use the results of a fulfilled promise, one attaches another
 /// promise to it (i.e. via `then`). Like their Javascript counterparts,
-/// promises can return an error (of type `E`). Unlike Javascript, success or /// failure is indicated by a `Result` type. This is much more Rustic and
+/// promises can return an error (of type `E`). Unlike Javascript, success or
+/// failure is indicated by a `Result` type. This is much more Rustic and
 /// allows existing functions which return a `Result<T, E>` to be used.
 ///
 /// # Panics
@@ -50,6 +51,8 @@ pub struct Promise<T: Send, E: Send> {
 impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Chains a function to be called after this promise resolves.
+    ///
+    ///
     pub fn then<T2, E2, F1, F2>(self, callback: F1, errback: F2)
                                 -> Promise<T2, E2>
     where T2: Send + 'static, E2: Send + 'static,
@@ -75,6 +78,39 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
         thread::spawn(move || {
             Promise::impl_then_result(tx, recv, callback);
+        });
+
+        Promise { receiver: rx }
+    }
+
+    /// Calls a function on the result of the promise if it is fulfilled.
+    ///
+    /// This is equivalent to a Javascript promise's `then` with one
+    /// callback, or Rust's `Result::map`.
+    pub fn ok_then<T2, F>(self, callback: F) -> Promise<T2, E>
+    where T2: Send + 'static, F: Send + 'static,
+    F: FnOnce(T) -> Result<T2, E> {
+        let recv = self.receiver;
+        let (tx, rx) = channel();
+
+        thread::spawn(move || {
+            Promise::impl_ok_then(tx, recv, callback);
+        });
+
+        Promise { receiver: rx }
+    }
+
+    /// Calls a function of the result of the promise if it fails.
+    ///
+    /// This is equivalent to Javascript promise's `catch`.
+    pub fn err_then<E2, F>(self, errback: F) -> Promise<T, E2>
+    where F: FnOnce(E) -> Result<T, E2>, F: Send + 'static,
+    E2: Send + 'static {
+        let recv = self.receiver;
+        let (tx, rx) = channel();
+
+        thread::spawn(move || {
+            Promise::impl_err_then(tx, recv, errback);
         });
 
         Promise { receiver: rx }
@@ -168,6 +204,30 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
         if let Ok(result) = rx.recv() {
             tx.send(callback(result)).unwrap_or(());
+        }
+    }
+
+    fn impl_ok_then<T2, F>(tx: Sender<Result<T2, E>>,
+                           rx: Receiver<Result<T, E>>, callback: F)
+    where F: FnOnce(T) -> Result<T2, E>, F: Send + 'static,
+    T2: Send + 'static {
+        if let Ok(message) = rx.recv() {
+            match message {
+                Ok(val) => tx.send(callback(val)).unwrap_or(()),
+                Err(err) => tx.send(Err(err)).unwrap_or(())
+            }
+        }
+    }
+
+    fn impl_err_then<E2, F>(tx: Sender<Result<T, E2>>,
+                           rx: Receiver<Result<T, E>>, errback: F)
+    where F: FnOnce(E) -> Result<T, E2>, F: Send + 'static,
+    E2: Send + 'static {
+        if let Ok(message) = rx.recv() {
+            match message {
+                Ok(val) => tx.send(Ok(val)).unwrap_or(()),
+                Err(err) => tx.send(errback(err)).unwrap_or(())
+            }
         }
     }
 
