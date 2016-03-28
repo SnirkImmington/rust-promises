@@ -1,4 +1,9 @@
 [package]
 name = "promises"
+description = "Effective, simple, lightweight Javascript promises in Rust"
 version = "0.1.0"
+repository = "https://github.com/SnirkImmington/rust-promises"
+keywords = ["promise", "Javascript", "async", "futures"]
+readme = "README.md"
+license = "MIT"
 authors = ["Snirk Immington <snirk.immington@gmail.com>"]
