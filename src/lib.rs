@@ -87,7 +87,7 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
     ///
     /// This is equivalent to a Javascript promise's `then` with one
     /// callback, or Rust's `Result::map`.
-    pub fn ok_then<T2, F>(self, callback: F) -> Promise<T2, E>
+    pub fn then_ok<T2, F>(self, callback: F) -> Promise<T2, E>
     where T2: Send + 'static, F: Send + 'static,
     F: FnOnce(T) -> Result<T2, E> {
         let recv = self.receiver;
@@ -103,7 +103,7 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
     /// Calls a function of the result of the promise if it fails.
     ///
     /// This is equivalent to Javascript promise's `catch`.
-    pub fn err_then<E2, F>(self, errback: F) -> Promise<T, E2>
+    pub fn then_err<E2, F>(self, errback: F) -> Promise<T, E2>
     where F: FnOnce(E) -> Result<T, E2>, F: Send + 'static,
     E2: Send + 'static {
         let recv = self.receiver;
