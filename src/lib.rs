@@ -3,6 +3,9 @@
 
 #![warn(missing_docs)]
 
+#[cfg(test)]
+mod tests;
+
 use std::thread;
 use std::sync::mpsc::channel;
 //use std::thread::JoinHandle;
