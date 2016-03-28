@@ -51,10 +51,11 @@ pub struct Promise<T: Send, E: Send> {
 impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Chains a function to be called after this promise resolves.
-    pub fn then<T2, E2>(self, callback: fn(t: T) -> Result<T2, E2>,
-                              errback:  fn(e: E) -> Result<T2, E2>)
-                        -> Promise<T2, E2>
-    where T2: Send + 'static, E2: Send + 'static {
+    pub fn then<T2, E2, F1, F2>(self, callback: F1, errback: F2)
+                                -> Promise<T2, E2>
+    where T2: Send + 'static, E2: Send + 'static,
+    F1: FnOnce(T) -> Result<T2, E2>, F2: FnOnce(E) -> Result<T2, E2>,
+    F1: Send + 'static, F2: Send + 'static {
         let recv = self.receiver;
         let (tx, rx) = channel();
 
@@ -67,10 +68,9 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Chains a function to be called after this promise resolves,
     /// using a `Result` type.
-    pub fn then_result<T2, E2>(self,
-                               callback: fn(r: Result<T, E>) -> Result<T2, E2>)
-                               -> Promise<T2, E2>
-    where T2: Send + 'static, E2: Send + 'static {
+    pub fn then_result<T2, E2, F>(self, callback: F) -> Promise<T2, E2>
+    where T2: Send + 'static, E2: Send + 'static,
+    F: FnOnce(Result<T, E>) -> Result<T2, E2>, F: Send + 'static {
         let recv = self.receiver;
         let (tx, rx) = channel();
 
@@ -146,11 +146,13 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         tx.send(result).unwrap_or(());
     }
 
-    fn impl_then<T2, E2>(tx: Sender<Result<T2, E2>>,
-                            rx: Receiver<Result<T, E>>,
-                            callback: fn(T) -> Result<T2, E2>,
-                            errback: fn(E) -> Result<T2, E2>)
-    where T2: Send + 'static, E2: Send + 'static {
+    fn impl_then<T2, E2, F1, F2>(tx: Sender<Result<T2, E2>>,
+                                 rx: Receiver<Result<T, E>>,
+                                 callback: F1, errback: F2)
+    where T2: Send + 'static, E2: Send + 'static,
+    F1: FnOnce(T) -> Result<T2, E2>, F2: FnOnce(E) -> Result<T2, E2>,
+    F1: Send + 'static, F2: Send + 'static
+    {
         if let Ok(message) = rx.recv() {
             match message {
                 Ok(val) => tx.send(callback(val)).unwrap_or(()),
@@ -159,10 +161,11 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
         }
     }
 
-    fn impl_then_result<T2, E2>(tx: Sender<Result<T2, E2>>,
-                                rx: Receiver<Result<T, E>>,
-                                callback: fn(Result<T, E>) -> Result<T2, E2>)
-    where T2: Send + 'static, E2: Send + 'static {
+    fn impl_then_result<T2, E2, F>(tx: Sender<Result<T2, E2>>,
+                                    rx: Receiver<Result<T, E>>,
+                                    callback: F)
+    where T2: Send + 'static, E2: Send + 'static,
+    F: FnOnce(Result<T, E>) -> Result<T2, E2>, F: Send + 'static {
 
         if let Ok(result) = rx.recv() {
             tx.send(callback(result)).unwrap_or(());
