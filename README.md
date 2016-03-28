@@ -1,6 +1,7 @@
 # rust-promises
 [![Crates.io](https://img.shields.io/badge/crates.io-v0.3-orange.svg)](https://crates.io/crate/promises)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/SnirkImmington/promises)
+
 This library seeks to fully, effectively and simply recreate lightweight 
 Javascript-style promises in Rust.
 
@@ -33,4 +34,6 @@ right now...)
 * Some of them are larger async libraries. They require programming within 
 event loops, or are designed for specific scenarios. If you want a whole async
 library for a specific type of programming, go use those.
-* The rest are variations on the promise concept, i.e. returning a `(Future, Promise)` pair from `Promise::new()`. If you know how to use that, go to those libraries, I guess.
+* The rest are variations on the promise concept, i.e. returning a 
+`(Future, Promise)` pair from `Promise::new()`. If you know how to use that, 
+go to those libraries, I guess.
