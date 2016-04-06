@@ -70,17 +70,54 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
 
     /// Chains a function to be called after this promise resolves,
     /// using a `Result` type.
-    pub fn then_result<T2, E2, F>(self, callback: F) -> Promise<T2, E2>
+    pub fn then_result<T2, E2, F>(self, resultback: F) -> Promise<T2, E2>
     where T2: Send + 'static, E2: Send + 'static,
     F: FnOnce(Result<T, E>) -> Result<T2, E2>, F: Send + 'static {
         let recv = self.receiver;
         let (tx, rx) = channel();
 
         thread::spawn(move || {
-            Promise::impl_then_result(tx, recv, callback);
+            Promise::impl_then_result(tx, recv, resultback);
         });
 
         Promise { receiver: rx }
+    }
+
+    /// Chains functions to be called after this promise resolves,
+    /// which return promises.
+    pub fn then_promise<T2, E2, F1, F2>(self, callback: F1, errback: F2)
+                                        -> Promise<T2, E2>
+    where T2: Send + 'static, E2: Send + 'static,
+    F1: FnOnce(T) -> Promise<T2, E2> + Send + 'static,
+    F2: FnOnce(E) -> Promise<T2, E2> + Send + 'static {
+        let val = self.receiver.recv();
+        match val {
+            Ok(result) => {
+                let promise = match result {
+                    Ok(val) => callback(val),
+                    Err(err) => errback(err)
+                };
+                return promise;
+            }
+            Err(err) =>
+                panic!("Unable to fulfill then_promise: \
+                        the previous promise panicked: {:?}", err)
+        }
+    }
+
+    /// Chains a function to be called after this promise resolves,
+    /// taking in its result and returning a promise.
+    pub fn then_result_promise<T2, E2, F>(&self, promiseback: F)
+                                          -> Promise<T2, E2>
+    where T2: Send + 'static, E2: Send + 'static,
+    F: FnOnce(Result<T, E>) -> Promise<T2, E2> + Send + 'static {
+        let val = self.receiver.recv();
+        match val {
+            Ok(result) => promiseback(result),
+            Err(err) =>
+                panic!("Unable to fulfill then_result_promise \
+                        the previous promise panicked: {:?}", err)
+        }
     }
 
     /// Calls a function on the result of the promise if it is fulfilled.
@@ -197,13 +234,13 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
     }
 
     fn impl_then_result<T2, E2, F>(tx: Sender<Result<T2, E2>>,
-                                    rx: Receiver<Result<T, E>>,
-                                    callback: F)
+                                   rx: Receiver<Result<T, E>>,
+                                   resultback: F)
     where T2: Send + 'static, E2: Send + 'static,
     F: FnOnce(Result<T, E>) -> Result<T2, E2>, F: Send + 'static {
 
         if let Ok(result) = rx.recv() {
-            tx.send(callback(result)).unwrap_or(());
+            tx.send(resultback(result)).unwrap_or(());
         }
     }
 
