@@ -307,10 +307,12 @@ impl<T: Send + 'static, E: Send + 'static> Promise<T, E> {
                             }
                         }
                         mut_receivers.remove(i);
+                        break;
                     }
                     Err(err) => {
                         if err == TryRecvError::Disconnected {
                             mut_receivers.remove(i);
+                            break;
                         }
                     }
                 }
