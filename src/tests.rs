@@ -84,3 +84,29 @@ pub fn test_then_ok() {
     assert!(file.read_to_string(&mut s).is_ok());
     assert_eq!(s, "Hello world!");
 }
+
+#[test]
+pub fn promise_all() {
+    let mut p: Vec<Promise<u32,u32>> = Vec::new();
+    for x in 0..10 {
+        p.push(Promise::new(move || {
+            thread::sleep(Duration::from_secs(1));
+            Ok(x)
+        })
+        .then(move |t| {
+            assert_eq!(t, x);
+            Ok(t)
+        }, |e| {
+            println!("err: {:?}", e);
+            Err(e)
+        }));
+    }
+
+    Promise::all(p).then( move |t| {
+      assert_eq!(t.len(), 10);
+      Ok(())
+    }, |e| {
+      println!("err: {:?}", e);
+      Err(())
+    });
+}
